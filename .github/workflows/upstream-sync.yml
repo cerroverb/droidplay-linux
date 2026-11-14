@@ -1,0 +1,121 @@
+name: upstream sync
+
+# Every hour: when enjoyerofslop/droidplay-core's main has commits linux-arm64 lacks, merge it, run linux.yml (build, unit tests, self test on an
+# arm64 runner) on the merge, and only then move linux-arm64 to it. This fork's main follows upstream's main as it is.
+# Pushes use the deploy key in SYNC_DEPLOY_KEY, which may push upstream's changes to .github/workflows (the workflow token may not).
+# A merge conflict is resolved by Claude Code when the secret CLAUDE_CODE_OAUTH_TOKEN is set; otherwise the run fails and linux-arm64 stays where it is.
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: enjoyerofslop/droidplay-core
+  BRANCH: linux-arm64
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    outputs:
+      stage: ${{ steps.push.outputs.stage }}
+    env:
+      HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push access (deploy key)
+        env:
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh && install -m 600 /dev/null ~/.ssh/sync_key
+          printf '%s\n' "$KEY" > ~/.ssh/sync_key
+          git remote set-url --push origin "git@github.com:$GITHUB_REPOSITORY.git"
+          git config core.sshCommand "ssh -i ~/.ssh/sync_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git config user.name cerroverb
+          git config user.email 84094990+cerroverb@users.noreply.github.com
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git fetch -q "https://github.com/$UPSTREAM.git" main
+          up=$(git rev-parse FETCH_HEAD); echo "up=$up" >> "$GITHUB_OUTPUT"
+          git push -q origin "$up:refs/heads/main"   # this fork's main follows upstream's (a fast-forward; a push that is not one fails here)
+          if git merge-base --is-ancestor "$up" HEAD; then echo "upstream main ${up:0:8} is already merged"; exit 0; fi
+          if git merge -q --no-edit -m "Merge $UPSTREAM main ${up:0:8}" "$up"; then echo "merged=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          files=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+          echo "conflicts in: $files"
+          echo "files=$files" >> "$GITHUB_OUTPUT"; echo "merged=1" >> "$GITHUB_OUTPUT"
+          [ "$HAS_CLAUDE" = true ] || { echo "::error::Merge conflict in $files and no CLAUDE_CODE_OAUTH_TOKEN"; exit 1; }
+
+      - name: Resolve the conflicts (Claude Code)
+        if: steps.merge.outputs.files != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            This repository is a fork of enjoyerofslop/droidplay-core that adds a Linux host (dm/linux, DM_LINUX), stopped in a merge of upstream main with conflicts in: ${{ steps.merge.outputs.files }}
+            Resolve only those conflicts with the Edit tool. Keep every Linux change of this fork and every upstream change: read both sides with git log and git show to learn why each exists. If upstream restructured the code, carry the fork's change over into the new structure. Add no new behaviour, and change nothing outside the conflicts. Remove all conflict markers. Do not stage or commit. If a conflict cannot be resolved with confidence, leave its markers in place and say why.
+          claude_args: >-
+            --allowedTools "Read,Edit,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(git blame:*)"
+            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(git add:*),Bash(curl:*),Bash(gh:*)"
+
+      - name: Check and commit the resolved merge
+        if: steps.merge.outputs.files != ''
+        env:
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          left=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+          [ "$left" = "$FILES" ] || { echo "::error::Unexpected files in conflict: $left"; exit 1; }
+          if grep -nE '^(<<<<<<<|=======$|>>>>>>>)' $FILES; then echo "::error::Conflict markers left"; exit 1; fi
+          git add $FILES && git commit -q --no-edit
+          echo "conflicts resolved by Claude Code in: $FILES" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the merge to a branch of its own, for the test
+        id: push
+        if: steps.merge.outputs.merged == '1'
+        env:
+          UP: ${{ steps.merge.outputs.up }}
+        run: |
+          stage="sync/${UP:0:12}"
+          git push -q origin "HEAD:refs/heads/$stage"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: merge
+    if: needs.merge.outputs.stage != ''
+    uses: ./.github/workflows/linux.yml
+    with:
+      ref: ${{ needs.merge.outputs.stage }}
+
+  advance:
+    needs: [merge, test]
+    if: needs.merge.outputs.stage != ''
+    runs-on: ubuntu-latest
+    env:
+      STAGE: ${{ needs.merge.outputs.stage }}
+    steps:
+      - name: Move linux-arm64 to the tested merge
+        env:
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh && install -m 600 /dev/null ~/.ssh/sync_key
+          printf '%s\n' "$KEY" > ~/.ssh/sync_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/sync_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git init -q r && cd r
+          remote="git@github.com:$GITHUB_REPOSITORY.git"
+          git fetch -q "$remote" "refs/heads/$STAGE"
+          git push -q "$remote" "FETCH_HEAD:refs/heads/$BRANCH"   # a fast-forward (the merge's first parent is linux-arm64); refused if linux-arm64 moved meanwhile
+          git push -q "$remote" ":refs/heads/$STAGE"
+          echo "linux-arm64 is now $(git rev-parse --short FETCH_HEAD)" >> "$GITHUB_STEP_SUMMARY"

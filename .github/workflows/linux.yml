@@ -1,19 +1,24 @@
 # The Linux host (dm/linux) on an arm64 runner: it builds with clang, its unit tests pass, and the self test module (dm/android/tests/selftest_nso.py, rewritten
 # with DM_TARGET=linux) runs natively on the command-line host: the guest's x18, tpidr_el0 and tpidrro_el0 through the TLS thread slots, the gates, an import and
-# a second guest thread. Ubuntu 25.10 in a container, for SDL3. Device tests (a window, a game) stay manual: say what you ran in the pull request.
+# a second guest thread. Ubuntu 25.10 in a container, for SDL3. Device tests (a window, a game) stay manual.
 name: linux
 
 on:
   pull_request:
   push:
-    branches: [main, linux-arm64]
+    branches: [linux-arm64]
   workflow_dispatch:
+  workflow_call:   # upstream-sync.yml, on a merge before it reaches linux-arm64
+    inputs:
+      ref:
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: linux-${{ github.event.pull_request.number || github.ref }}
+  group: linux-${{ inputs.ref || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -26,6 +31,8 @@ defaults:
 jobs:
   host:
     name: Linux arm64 host build, unit tests and self test
+    # an upstream merge that upstream-sync.yml pushes was tested before it was pushed
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge enjoyerofslop/droidplay-core main')
     runs-on: ubuntu-24.04-arm
     container: ubuntu:25.10
     timeout-minutes: 40
@@ -38,6 +45,7 @@ jobs:
           python3 -m pip install --break-system-packages -q capstone lz4
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
       - name: Build the Linux host (the windowed host, the command-line host and the unit tests)
         run: |
