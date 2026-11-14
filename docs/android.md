@@ -131,10 +131,14 @@ The command line's requirements are in [What the command line needs](#what-the-c
 ## DroidPlay for Linux (preview)
 
 DroidPlay for Linux is the app of [DroidPlay for Windows](#droidplay-for-windows) packed as one AppImage, `DroidPlay-<version>-x86_64.AppImage` (about
-130 MB), built the same way: its own Python with the app's modules and Qt, and DroidPlay Core. It's a preview for testers: it isn't on the release page yet.
+130 MB), built the same way: its own Python with the app's modules and Qt, and DroidPlay Core. It's in preview.
 
-- **Getting it:** the **DroidPlay-AppImage** artifact of the `linux-package` workflow's latest run (the AppImage and its `.sha256`, kept for 7 days), or
-  build it from a checkout with `dm/android/linux/stage.sh --out <folder>` (x86_64 Linux with uv, git, curl and binutils' readelf).
+- **Getting it:** `DroidPlay-<version>-x86_64.AppImage` from the [latest release](https://github.com/enjoyerofslop/droidplay-core/releases/latest), beside
+  Windows' Setup, with its `.sha256` (`sha256sum -c DroidPlay-<version>-x86_64.AppImage.sha256`; the release page lists each file's SHA-256 too). Each
+  release gets it a few minutes after it's published, once it has started on five distributions (`release-assets.yml`); releases from before the AppImage
+  have Setup alone. Something newer than the latest release: the **DroidPlay-AppImage** artifact of a `linux-package` workflow run (kept for 7 days; a test
+  build, which doesn't look for updates), or build it from a checkout with `dm/android/linux/stage.sh --out <folder>` (x86_64 Linux with uv, git, curl and
+  binutils' readelf).
 - **What it runs on:** x86_64 Linux with glibc 2.34 or later: Ubuntu 22.04, Debian 12, Fedora 35, RHEL 9, Linux Mint 21, SteamOS 3 or newer, and current
   Arch, openSUSE Tumbleweed and their relatives. There is no arm64 build, since Google publishes the Android SDK for Linux on x86_64 alone. It draws its
   window with X11 or Wayland, whichever the desktop runs (`QT_QPA_PLATFORM=xcb` forces X11), and needs the libraries every desktop has: OpenGL/EGL,
@@ -166,9 +170,18 @@ DroidPlay for Linux is the app of [DroidPlay for Windows](#droidplay-for-windows
 - **Where things go:** your games' builds beside their NSP files (`<title ID>_build`), as on Windows; the game hosts, the APK and the build journals in
   `~/.local/share/nxnative/android` (`$XDG_DATA_HOME/nxnative/android`), shared with the command line; settings in `~/.config/nxnative/android.conf`;
   the signing key in `~/.android/nxnative-debug.jks`.
-- **Updating:** it doesn't update itself yet: open the new AppImage instead. **Uninstalling:** **Remove** the menu entry in Settings if you added one,
-  then delete the AppImage and `~/.local/share/DroidPlay`; the tools Install tools brought are in `~/.local/share/nxnative/android/tools`, and the folders
-  above keep your builds, settings and signing key until you delete them too.
+- **Updating:** DroidPlay says when a newer release is out, as on Windows, and **Update** (or **Update to &lt;version&gt;** under Updates in Settings)
+  downloads the release's AppImage into the folder of the one you opened, checks it against the SHA-256 GitHub lists for it, renames it into place, then
+  closes and opens the new one, whose first start prepares the new version and keeps the previous one. Not during a build.
+  - The file keeps saying its version: `DroidPlay-0.9.0-x86_64.AppImage` becomes `DroidPlay-0.9.1-x86_64.AppImage`, and the menu entry DroidPlay added
+    follows it. A name of your own (`DroidPlay.AppImage`, or one an AppImage manager gave it) stays and the file is replaced in place, so a link or a
+    launcher that starts it still does: rename the AppImage once if you start it from a link.
+  - Before writing anything, DroidPlay checks that it can write to the AppImage's folder and that there's room for the new AppImage and its first start
+    (about 1 GB). A download that is cut short or doesn't match the release is deleted. Either way the old AppImage stays as it was.
+  - **Download** opens the release page instead, and Settings says why, where DroidPlay can't write to the AppImage's folder, for a test build from CI
+    (its version isn't a release's) and for DroidPlay run from source; also while a release has no AppImage, as in the minutes before a new release's is up.
+- **Uninstalling:** **Remove** the menu entry in Settings if you added one, then delete the AppImage and `~/.local/share/DroidPlay`; the tools Install
+  tools brought are in `~/.local/share/nxnative/android/tools`, and the folders above keep your builds, settings and signing key until you delete them too.
 - **Licences:** each part's licence and a list of what's inside are in `~/.local/share/DroidPlay/<version>/licenses` (`NOTICES.md`). Qt and Qt for
   Python are LGPL: their libraries are in `runtime/lib/python3.14/site-packages/PySide6/Qt/lib` there, and can be replaced. DroidPlay for Windows carries the same notices in
   `%LOCALAPPDATA%\Programs\DroidPlay\licenses`.
