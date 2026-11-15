@@ -64,3 +64,4 @@ jobs:
           DM_DBG=1 timeout 120 build/dmhost_cli "$st/patched" main 2>&1 | tee "$st/log.txt"
           grep -q 'selftest: PASS' "$st/log.txt"
           ! grep -E 'CRASH|FATAL' "$st/log.txt"   # nor a crash after it (a guest thread's exit)
+          ! grep -E 'reach past 2\^39|no room below 2\^39' "$st/log.txt"   # the guest block below 2^39, as a Switch's addresses are

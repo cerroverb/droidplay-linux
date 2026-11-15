@@ -124,6 +124,9 @@ void dm_slot_set(pthread_key_t k, const void *v);
 void dm_slots_thread_init(void);   // give the calling thread its slot block and point x18 at it (idempotent)
 int64_t dm_slot_keypage_value(pthread_key_t k);
 void dm_slots_x18_restore(void);   // x18 back to the value bionic gave the calling thread, before it returns into frames that may use a shadow call stack
+#ifdef DM_LINUX
+void *dm_linux_map_low(size_t len, int prot, int flags);   // an anonymous mapping below 2^39, or NULL (dm/linux/plat_linux.c)
+#endif
 #else
 #define dm_slot_get pthread_getspecific
 #define dm_slot_set pthread_setspecific

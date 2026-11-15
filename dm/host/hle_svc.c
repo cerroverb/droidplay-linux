@@ -338,7 +338,12 @@ static void mem_init_once(void) {
 #ifdef DM_ANDROID
     // 32 MB-aligned, as the Mac's mmap of a block this size happens to give it: Linux aligns it to a page, so the heap (256 MB in) started 32 KB-aligned, where Horizon's
     // heap is at least 2 MB-aligned. Metroid Prime Remastered then crashed at its first nnMain steps, writing through 0x6aaac0 (docs/reference/memory.md)
-    { const size_t al = 0x2000000; uint8_t *raw = mmap(NULL, g_reserve + al, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    g_as = NULL;
+#ifdef DM_LINUX
+    // Below 2^39, as a Switch's addresses are (dm/linux/plat_linux.c), at a 4 GiB boundary, so 32 MB-aligned too
+    if (!(g_as = dm_linux_map_low(g_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANON))) LOG("[RED] [mem] no room below 2^39 for the guest block of %#llx bytes: it goes where the kernel puts it", (unsigned long long)g_reserve);
+#endif
+    if (!g_as) { const size_t al = 0x2000000; uint8_t *raw = mmap(NULL, g_reserve + al, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
       if (raw == MAP_FAILED) die("reserve guest AS");
       g_as = (uint8_t *)(((uintptr_t)raw + al - 1) & ~(uintptr_t)(al - 1));
       if (g_as > raw) munmap(raw, (size_t)(g_as - raw));

@@ -34,7 +34,12 @@ void dm_modules_reserve(const char *dir, module_t *mods, int n) {
         g_off[i] = span; span += g_pre[i] + g_size[i];
     }
     // Address space only: map_image maps each module over its part with MAP_FIXED, and the parts cover the whole reservation
+#ifdef DM_LINUX
+    void *a = dm_linux_map_low(span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE);   // below 2^39, as on a Switch (dm/linux/plat_linux.c)
+    if (!a) a = MAP_FAILED;
+#else
     void *a = mmap(NULL, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+#endif
     if (a == MAP_FAILED) { LOG("modules: cannot reserve %#llx bytes for %d modules back to back: each one where the kernel puts it", (unsigned long long)span, n); return; }
     g_base = a; g_mods = mods; g_n = n;
     LOG("modules: %d back to back at %p (%#llx bytes), as Horizon maps them", n, a, (unsigned long long)span);

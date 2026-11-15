@@ -33,8 +33,8 @@ static void *one(void *a) {
 }
 int main(void) {
     enum { N = 200 };
-#ifdef __ANDROID__
-    g_key18 = 0; g_keytls = 1; g_keytlr = 2; g_keygate = 3;   // the slot numbers of the x18 block (loader.c create_keys)
+#if defined(__ANDROID__) || defined(DM_LINUX)
+    g_key18 = 0; g_keytls = 1; g_keytlr = 2; g_keygate = 3;   // the slot numbers of the x18 block or of the TLS slots (loader.c create_keys)
 #else
     if (pthread_key_create(&g_key18, NULL) || pthread_key_create(&g_keytls, NULL) || pthread_key_create(&g_keytlr, NULL) || pthread_key_create(&g_keygate, NULL)) { printf("key creation failed\n"); return 2; }
 #endif
