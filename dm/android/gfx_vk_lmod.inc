@@ -63,6 +63,7 @@ static uint32_t *lm_code(const char *path, uint32_t miss, int alpha, int tff, ui
             free(s); free(o);
         }
     }
+    uint32_t *nph = NULL; size_t nphn = spv_fit_nophys(code, n, path, &nph); if (nphn) { free(code); code = nph; n = nphn; }   // raw memory off: no physical pointer read (spv_nophys.h)
     uint32_t *gc = NULL; size_t gcn = spv_fit_gmcache(code, n, path, &gc); if (gcn) { free(code); code = gc; n = gcn; }   // raw memory helpers' last entry kept in private words (spv_gmcache.h)
     uint32_t *np = NULL; size_t npn = gm_np_code(code, n, path, first, &np); if (npn) { free(code); code = np; n = npn; }   // raw memory without physical pointers (spv_noptr.h)
     uint32_t *vi = NULL; size_t vn = spv_fit_vsinit(code, n, path, &vi); if (vn) { free(code); code = vi; n = vn; }   // vertex outputs start as (0,0,0,1)
@@ -137,6 +138,13 @@ static VkShaderModule lm_module(lmod *l) {   // the module itself, made now when
     if (!atomic_compare_exchange_strong(&l->m, &none, made)) { vkDestroyShaderModule(g_vk.dev, made, NULL); return none; }   // another thread's pipeline made it meanwhile
     return made;
 }
+static __thread uint64_t t_lm_big, t_lm_mem;   // the largest pipeline object the driver made in this thread's last lm_pipeline, and all it made (the memory report; gfx_vk_pheavy.inc)
+static void lm_pstats(VkPipeline p, lmod *const *lms, uint32_t ns) {   // DM_VK_PIPE_STATS: the pipeline's statistics, named by its shaders' files
+    if (!g_ps_on) return;
+    char w[200]; size_t n = 0; w[0] = 0;
+    for (uint32_t i = 0; i < ns && i < 5 && n < sizeof w; i++) { const char *b = strrchr(lms[i]->path, '/'); n += (size_t)snprintf(w + n, sizeof w - n, "%s%s", i ? " + " : "", b ? b + 1 : lms[i]->path); }
+    ps_report(p, w, t_lm_mem, t_lm_big);
+}
 // A graphics (gp) or compute (cp) pipeline whose ns stages st name the modules lms: from the identifiers of those not made yet when the driver's cache has the
 // pipeline, else with the modules made now. Called with or without the replay's lock, as pipe_make and cpipe_get are
 static VkResult lm_pipeline(VkGraphicsPipelineCreateInfo *gp, VkComputePipelineCreateInfo *cp, VkPipelineShaderStageCreateInfo *st, lmod *const *lms, uint32_t ns, VkPipeline *out) {
@@ -148,14 +156,19 @@ static VkResult lm_pipeline(VkGraphicsPipelineCreateInfo *gp, VkComputePipelineC
                              st[i].pNext = &sid[i]; byid = 1; }
     }
     VkPipelineCreateFlags *fl = gp ? &gp->flags : &cp->flags; VkResult pr;
+    if (g_ps_on) *fl |= ps_flags();   // DM_VK_PIPE_STATS
+    t_mr_pipe = t_mr_pipe_big = 0;   // what the driver makes for it on this thread (the memory report's callback, when asked for)
     if (byid) {
         *fl |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
         pr = gp ? vkCreateGraphicsPipelines(g_vk.dev, pcache(), 1, gp, NULL, out) : vkCreateComputePipelines(g_vk.dev, pcache(), 1, cp, NULL, out);
         *fl &= ~(VkPipelineCreateFlags)VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
-        if (pr == VK_SUCCESS) { atomic_fetch_add(&g_lm_hit, 1); return pr; }
+        if (pr == VK_SUCCESS) { atomic_fetch_add(&g_lm_hit, 1); t_lm_big = t_mr_pipe_big; t_lm_mem = t_mr_pipe; lm_pstats(*out, lms, ns); return pr; }
         // VK_PIPELINE_COMPILE_REQUIRED, the cache's answer for a pipeline it does not have (any other answer is taken as that too): the modules, then a compile
         atomic_fetch_add(&g_lm_miss, 1); *out = VK_NULL_HANDLE;
         for (uint32_t i = 0; i < ns && i < 5; i++) if (!st[i].module) { st[i].pNext = NULL; if (!(st[i].module = lm_module(lms[i]))) return VK_ERROR_INITIALIZATION_FAILED; }
     }
-    return gp ? vkCreateGraphicsPipelines(g_vk.dev, pcache(), 1, gp, NULL, out) : vkCreateComputePipelines(g_vk.dev, pcache(), 1, cp, NULL, out);
+    pr = gp ? vkCreateGraphicsPipelines(g_vk.dev, pcache(), 1, gp, NULL, out) : vkCreateComputePipelines(g_vk.dev, pcache(), 1, cp, NULL, out);
+    t_lm_big = t_mr_pipe_big; t_lm_mem = t_mr_pipe;
+    if (pr == VK_SUCCESS) lm_pstats(*out, lms, ns);
+    return pr;
 }
