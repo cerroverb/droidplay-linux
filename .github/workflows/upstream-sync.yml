@@ -99,9 +99,76 @@ jobs:
     with:
       ref: ${{ needs.merge.outputs.stage }}
 
-  advance:
+  # A merge that fails the test goes to Claude Code once: the fix is pushed to the stage branch and tested again.
+  repair:
     needs: [merge, test]
-    if: needs.merge.outputs.stage != ''
+    if: failure() && needs.merge.outputs.stage != '' && needs.test.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      STAGE: ${{ needs.merge.outputs.stage }}
+      HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+    steps:
+      - name: Claude Code
+        run: '[ "$HAS_CLAUDE" = true ] || { echo "::error::The test failed and there is no CLAUDE_CODE_OAUTH_TOKEN to repair it"; exit 1; }'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.STAGE }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: The failed test's log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '[.jobs[] | select(.conclusion == "failure")][0].id')
+          gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > .test-failure.log
+          tail -n 40 .test-failure.log
+
+      - name: Repair the merge (Claude Code)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            This repository is a fork of enjoyerofslop/droidplay-core that adds a Linux host (dm/linux, DM_LINUX). HEAD merges upstream main, and the Linux test (.github/workflows/linux.yml: build, unit tests, self test) failed on it. The test's log is in .test-failure.log: read its end first.
+            Find the cause and fix it with the smallest change. Port, do not invent: when upstream added or changed something that the Linux host lacks, carry upstream's change over the way the fork's existing Linux code does, and name the upstream file in a short comment. Read both sides with git log, git show and git grep to learn why each change exists. Never change .github/ or the tests' expectations. Add no new behaviour and change nothing unrelated to the error. Do not stage or commit. If the cause is outside the repository (a package server, the runner) or not clear, change nothing and say why.
+          claude_args: >-
+            --allowedTools "Read,Edit,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git grep:*),Bash(git status:*),Bash(git blame:*)"
+            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(git add:*),Bash(curl:*),Bash(gh:*)"
+
+      - name: Check and push the repair
+        env:
+          KEY: ${{ secrets.SYNC_DEPLOY_KEY }}
+        run: |
+          rm -f .test-failure.log
+          changed=$(git diff --name-only)
+          [ -n "$changed" ] || { echo "::error::The test failed and was not repaired (see the test job)"; exit 1; }
+          echo "repaired: $changed"
+          if echo "$changed" | grep -qE '^\.github/'; then echo "::error::The repair changed .github"; exit 1; fi
+          git diff
+          git config user.name cerroverb
+          git config user.email 84094990+cerroverb@users.noreply.github.com
+          git commit -qam "Repair the Linux host after the upstream merge (Claude Code)"
+          install -m 700 -d ~/.ssh && install -m 600 /dev/null ~/.ssh/sync_key
+          printf '%s\n' "$KEY" > ~/.ssh/sync_key
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/sync_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+            git push -q "git@github.com:$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$STAGE"
+          echo "repaired by Claude Code in: $changed" >> "$GITHUB_STEP_SUMMARY"
+
+  retest:
+    needs: [merge, repair]
+    if: always() && needs.repair.result == 'success'
+    uses: ./.github/workflows/linux.yml
+    with:
+      ref: ${{ needs.merge.outputs.stage }}
+
+  advance:
+    needs: [merge, test, retest]
+    if: always() && needs.merge.outputs.stage != '' && (needs.test.result == 'success' || needs.retest.result == 'success')
     runs-on: ubuntu-latest
     env:
       STAGE: ${{ needs.merge.outputs.stage }}
