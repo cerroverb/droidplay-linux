@@ -27,6 +27,11 @@ jobs:
       stage: ${{ steps.push.outputs.stage }}
     env:
       HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      # (commits after a Claude Code step are cerroverb's: the action leaves its own git identity behind)
+      GIT_AUTHOR_NAME: cerroverb
+      GIT_AUTHOR_EMAIL: 84094990+cerroverb@users.noreply.github.com
+      GIT_COMMITTER_NAME: cerroverb
+      GIT_COMMITTER_EMAIL: 84094990+cerroverb@users.noreply.github.com
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,6 +115,11 @@ jobs:
     env:
       STAGE: ${{ needs.merge.outputs.stage }}
       HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+      # (commits after a Claude Code step are cerroverb's: the action leaves its own git identity behind)
+      GIT_AUTHOR_NAME: cerroverb
+      GIT_AUTHOR_EMAIL: 84094990+cerroverb@users.noreply.github.com
+      GIT_COMMITTER_NAME: cerroverb
+      GIT_COMMITTER_EMAIL: 84094990+cerroverb@users.noreply.github.com
     steps:
       - name: Claude Code
         run: '[ "$HAS_CLAUDE" = true ] || { echo "::error::The test failed and there is no CLAUDE_CODE_OAUTH_TOKEN to repair it"; exit 1; }'
